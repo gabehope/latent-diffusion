@@ -76,7 +76,7 @@ class VQModel(pl.LightningModule):
                     print(f"{context}: Restored training weights")
 
     def init_from_ckpt(self, path, ignore_keys=list()):
-        sd = torch.load(path, map_location="cpu")["state_dict"]
+        sd = torch.load(path, map_location="cpu", weights_only=False)["state_dict"]
         keys = list(sd.keys())
         for k in keys:
             for ik in ignore_keys:
@@ -311,7 +311,7 @@ class AutoencoderKL(pl.LightningModule):
             self.init_from_ckpt(ckpt_path, ignore_keys=ignore_keys)
 
     def init_from_ckpt(self, path, ignore_keys=list()):
-        sd = torch.load(path, map_location="cpu")["state_dict"]
+        sd = torch.load(path, map_location="cpu", weights_only=False)["state_dict"]
         keys = list(sd.keys())
         for k in keys:
             for ik in ignore_keys:
@@ -331,6 +331,11 @@ class AutoencoderKL(pl.LightningModule):
         z = self.post_quant_conv(z)
         dec = self.decoder(z)
         return dec
+    
+    def sample(self, batch_size):
+        curr_res = self.decoder.resolution // 2**(self.decoder.num_resolutions-1)
+        z = torch.randn((batch_size, self.embed_dim, curr_res, curr_res), device=self.device)
+        return self.decode(z)
 
     def forward(self, input, sample_posterior=True):
         posterior = self.encode(input)

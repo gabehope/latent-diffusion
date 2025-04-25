@@ -1,6 +1,6 @@
 model:
   base_learning_rate: 1.0e-06
-  target: ldm.models.diffusion.ddpm.LatentDiffusion
+  target: ldm.models.diffusion.ddpm_vae.DDPMVAE
   params:
     linear_start: 0.0015
     linear_end: 0.0195
@@ -8,19 +8,21 @@ model:
     log_every_t: 200
     timesteps: 1000
     first_stage_key: image
-    cond_stage_key: class_label
+    kl_weight: 1e-6
     image_size: 32
-    channels: 4
+    channels: 3
     cond_stage_trainable: true
     conditioning_key: crossattn
+    consistency_weight: 0.
     monitor: val/loss_simple_ema
+    learn_logvar: false
     unet_config:
       target: ldm.modules.diffusionmodules.openaimodel.UNetModel
       params:
         image_size: 32
-        in_channels: 4
-        out_channels: 4
-        model_channels: 256
+        in_channels: 3
+        out_channels: 3
+        model_channels: 128
         attention_resolutions:
         #note: this isn\t actually the resolution but
         # the downsampling factor, i.e. this corresnponds to
@@ -37,52 +39,44 @@ model:
         num_head_channels: 32
         use_spatial_transformer: true
         transformer_depth: 1
-        context_dim: 512
+        context_dim: 64
     first_stage_config:
-      target: ldm.models.autoencoder.VQModelInterface
+      target: ldm.models.autoencoder.IdentityFirstStage
+    cond_stage_config:
+      target: ldm.models.autoencoder.AutoencoderKL
       params:
-        embed_dim: 4
-        n_embed: 16384
-        ckpt_path: models/first_stage_models/vq-f8/model.ckpt
+        embed_dim: 64
         ddconfig:
-          double_z: false
-          z_channels: 4
-          resolution: 256
+          flat_latent_z: False
+          efficient: True
+          resamp_with_conv: True
+          double_z: True
+          z_channels: 64
+          resolution: 32
           in_channels: 3
           out_ch: 3
           ch: 128
-          ch_mult:
-          - 1
-          - 2
-          - 2
-          - 4
+          ch_mult: [1, 2, 2, 4]  # num_down = len(ch_mult)-1
           num_res_blocks: 2
-          attn_resolutions:
-          - 32
+          attn_resolutions:  [16, 8, 4]
+          num_heads: 4
           dropout: 0.0
         lossconfig:
           target: torch.nn.Identity
-    cond_stage_config:
-      target: ldm.modules.encoders.modules.ClassEmbedder
-      params:
-        embed_dim: 512
-        key: class_label
 data:
   target: main.DataModuleFromConfig
   params:
-    batch_size: 64
-    num_workers: 12
+    batch_size: 128
+    num_workers: 24
     wrap: false
     train:
-      target: ldm.data.imagenet.ImageNetTrain
+      target: ldm.data.cifar.CIFARTrain
       params:
-        config:
-          size: 256
+        data_root: /scratch/gabe/imagenet_ldm
     validation:
-      target: ldm.data.imagenet.ImageNetValidation
+      target: ldm.data.cifar.CIFARValidation
       params:
-        config:
-          size: 256
+        data_root: /scratch/gabe/imagenet_ldm
 
 
 lightning:
@@ -90,9 +84,10 @@ lightning:
     image_logger:
       target: main.ImageLogger
       params:
-        batch_frequency: 5000
+        batch_frequency: 1000
         max_images: 8
         increase_log_steps: False
 
   trainer:
     benchmark: True
+    accumulate_grad_batches: 1

@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from functools import partial
 from tqdm import tqdm
 from torchvision.utils import make_grid
-from pytorch_lightning.utilities.distributed import rank_zero_only
+from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
 from ldm.util import log_txt_as_img, exists, default, ismap, isimage, mean_flat, count_params, instantiate_from_config
 from ldm.modules.ema import LitEma
@@ -109,9 +109,11 @@ class DDPM(pl.LightningModule):
         self.loss_type = loss_type
 
         self.learn_logvar = learn_logvar
-        self.logvar = torch.full(fill_value=logvar_init, size=(self.num_timesteps,))
+        logvar = torch.full(fill_value=logvar_init, size=(self.num_timesteps,))
         if self.learn_logvar:
-            self.logvar = nn.Parameter(self.logvar, requires_grad=True)
+            self.logvar = nn.Parameter(logvar, requires_grad=True)
+        else:
+            self.register_buffer('logvar', logvar, persistent=True)
 
 
     def register_schedule(self, given_betas=None, beta_schedule="linear", timesteps=1000,
@@ -318,6 +320,8 @@ class DDPM(pl.LightningModule):
 
         loss_dict.update({f'{log_prefix}/loss': loss})
 
+
+
         return loss, loss_dict
 
     def forward(self, x, *args, **kwargs):
@@ -475,7 +479,7 @@ class LatentDiffusion(DDPM):
 
     @rank_zero_only
     @torch.no_grad()
-    def on_train_batch_start(self, batch, batch_idx, dataloader_idx):
+    def on_train_batch_start(self, batch, batch_idx):
         # only for very first batch
         if self.scale_by_std and self.current_epoch == 0 and self.global_step == 0 and batch_idx == 0 and not self.restarted_from_ckpt:
             assert self.scale_factor == 1., 'rather not use custom rescaling and std-rescaling simultaneously'
@@ -1009,7 +1013,7 @@ class LatentDiffusion(DDPM):
         kl_prior = normal_kl(mean1=qt_mean, logvar1=qt_log_variance, mean2=0.0, logvar2=0.0)
         return mean_flat(kl_prior) / np.log(2.0)
 
-    def p_losses(self, x_start, cond, t, noise=None):
+    def p_losses(self, x_start, cond, t, noise=None, return_x0=False, return_simple=False, clip_denoised=True):
         noise = default(noise, lambda: torch.randn_like(x_start))
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
         model_output = self.apply_model(x_noisy, t, cond)
@@ -1041,6 +1045,18 @@ class LatentDiffusion(DDPM):
         loss_dict.update({f'{prefix}/loss_vlb': loss_vlb})
         loss += (self.original_elbo_weight * loss_vlb)
         loss_dict.update({f'{prefix}/loss': loss})
+
+        if return_x0:
+            if self.parameterization == "eps":
+                x_recon = self.predict_start_from_noise(x_noisy, t=t, noise=model_output)
+            elif self.parameterization == "x0":
+                x_recon = model_output
+            if clip_denoised:
+                x_recon.clamp_(-1., 1.)
+            return loss, loss_dict, x_recon
+        
+        if return_simple:
+            return loss, loss_dict, loss_simple
 
         return loss, loss_dict
 
@@ -1266,8 +1282,9 @@ class LatentDiffusion(DDPM):
         log["reconstruction"] = xrec
         if self.model.conditioning_key is not None:
             if hasattr(self.cond_stage_model, "decode"):
-                xc = self.cond_stage_model.decode(c)
-                log["conditioning"] = xc
+                pass
+                #xc = self.cond_stage_model.decode(c)
+                #log["conditioning"] = xc
             elif self.cond_stage_key in ["caption"]:
                 xc = log_txt_as_img((x.shape[2], x.shape[3]), batch["caption"])
                 log["conditioning"] = xc

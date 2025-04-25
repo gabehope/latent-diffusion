@@ -8,6 +8,7 @@ from omegaconf import OmegaConf
 from functools import partial
 from PIL import Image
 from tqdm import tqdm
+import torch
 from torch.utils.data import Dataset, Subset
 
 import taming.data.utils as tdu
@@ -40,7 +41,10 @@ class ImageNetBase(Dataset):
         return len(self.data)
 
     def __getitem__(self, i):
-        return self.data[i]
+        item = self.data[i]
+        if hasattr(self, 'embeded') and self.embeded and self.data_root:
+            item[self.embeded] = torch.tensor(np.load(os.path.join(self.data_root, self.embeded, item['relpath'].split('.')[0]) + ".npz")['inputs'])
+        return item
 
     def _prepare(self):
         raise NotImplementedError()
@@ -142,9 +146,10 @@ class ImageNetTrain(ImageNetBase):
         147897477120,
     ]
 
-    def __init__(self, process_images=True, data_root=None, **kwargs):
+    def __init__(self, process_images=True, data_root=None, embeded=None, **kwargs):
         self.process_images = process_images
         self.data_root = data_root
+        self.embeded = embeded
         super().__init__(**kwargs)
 
     def _prepare(self):
@@ -208,9 +213,10 @@ class ImageNetValidation(ImageNetBase):
         1950000,
     ]
 
-    def __init__(self, process_images=True, data_root=None, **kwargs):
+    def __init__(self, process_images=True, data_root=None, embeded=None, **kwargs):
         self.data_root = data_root
         self.process_images = process_images
+        self.embeded = embeded
         super().__init__(**kwargs)
 
     def _prepare(self):
@@ -272,7 +278,7 @@ class ImageNetValidation(ImageNetBase):
 class ImageNetSR(Dataset):
     def __init__(self, size=None,
                  degradation=None, downscale_f=4, min_crop_f=0.5, max_crop_f=1.,
-                 random_crop=True):
+                 random_crop=True, data_root=None):
         """
         Imagenet Superresolution Dataloader
         Performs following ops in order:
@@ -289,6 +295,7 @@ class ImageNetSR(Dataset):
         :param data_root:
         :param random_crop:
         """
+        self.data_root = data_root
         self.base = self.get_base()
         assert size
         assert (size / downscale_f).is_integer()
@@ -379,7 +386,7 @@ class ImageNetSRTrain(ImageNetSR):
     def get_base(self):
         with open("data/imagenet_train_hr_indices.p", "rb") as f:
             indices = pickle.load(f)
-        dset = ImageNetTrain(process_images=False,)
+        dset = ImageNetTrain(process_images=False, data_root=self.data_root)
         return Subset(dset, indices)
 
 
@@ -390,5 +397,5 @@ class ImageNetSRValidation(ImageNetSR):
     def get_base(self):
         with open("data/imagenet_val_hr_indices.p", "rb") as f:
             indices = pickle.load(f)
-        dset = ImageNetValidation(process_images=False,)
+        dset = ImageNetValidation(process_images=False, data_root=self.data_root)
         return Subset(dset, indices)

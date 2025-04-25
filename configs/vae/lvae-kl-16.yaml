@@ -1,0 +1,81 @@
+model:
+  base_learning_rate: 1.0e-4
+  target: ldm.models.latentvae.LatentVAE
+  params:
+    first_stage_key: image
+    monitor: val/loss_simple_ema
+    lossconfig:
+      target: ldm.modules.losses.NLL
+      params:
+        kl_weight: 0.001
+        logvar_init: 5.0
+
+    vae_config:
+      target: ldm.models.autoencoder.AutoencoderKL
+      params:
+        embed_dim: 256
+        ddconfig:
+          flat_latent_z: True
+          double_z: True
+          z_channels: 256
+          resolution: 16
+          in_channels: 16
+          out_ch: 16
+          ch: 256
+          ch_mult: [1, 2, 4]  # num_down = len(ch_mult)-1
+          num_res_blocks: 2
+          attn_resolutions: [16, 8, 4]
+          dropout: 0.0
+        lossconfig:
+          target: torch.nn.Identity
+
+    first_stage_config:
+      target: ldm.models.autoencoder.AutoencoderKL
+      params:
+        embed_dim: 16
+        ckpt_path: "models/first_stage_models/kl-f16/model.ckpt"
+        ddconfig:
+          double_z: True
+          z_channels: 16
+          resolution: 256
+          in_channels: 3
+          out_ch: 3
+          ch: 128
+          ch_mult: [ 1,1,2,2,4]  # num_down = len(ch_mult)-1
+          num_res_blocks: 2
+          attn_resolutions: [16]
+          dropout: 0.0
+        lossconfig:
+          target: torch.nn.Identity
+
+data:
+  target: main.DataModuleFromConfig
+  params:
+    batch_size: 64
+    num_workers: 12
+    wrap: false
+    train:
+      target: ldm.data.imagenet.ImageNetTrain
+      params:
+        data_root: /scratch/gabe/imagenet_ldm
+        config:
+          size: 256
+    validation:
+      target: ldm.data.imagenet.ImageNetValidation
+      params:
+        data_root: /scratch/gabe/imagenet_ldm
+        config:
+          size: 256
+
+lightning:
+  callbacks:
+    image_logger:
+      target: main.ImageLogger
+      params:
+        batch_frequency: 5000
+        max_images: 8
+        increase_log_steps: False
+
+  trainer:
+    benchmark: True
+    max_epochs: 50

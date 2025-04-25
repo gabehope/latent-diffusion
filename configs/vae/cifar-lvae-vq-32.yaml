@@ -1,0 +1,64 @@
+model:
+  base_learning_rate: 1.0e-6
+  target: ldm.models.latentvae.LatentVAE
+  params:
+    first_stage_key: image
+    monitor: val/total_loss
+    lossconfig:
+      target: ldm.modules.losses.NLL
+      params:
+        kl_weight: 1e-6
+
+    vae_config:
+      target: ldm.models.autoencoder.AutoencoderKL
+      params:
+        embed_dim: 64
+        ddconfig:
+          flat_latent_z: False
+          efficient: True
+          resamp_with_conv: True
+          double_z: True
+          z_channels: 64
+          resolution: 32
+          in_channels: 3
+          out_ch: 3
+          ch: 64
+          ch_mult: [1, 2, 2, 4]  # num_down = len(ch_mult)-1
+          num_res_blocks: 2
+          attn_resolutions:  [16, 8, 4]
+          num_heads: 4
+          dropout: 0.0
+        lossconfig:
+          target: torch.nn.Identity
+
+    first_stage_config:
+      target: ldm.models.autoencoder.IdentityFirstStage
+data:
+  target: main.DataModuleFromConfig
+  params:
+    batch_size: 128
+    num_workers: 24
+    wrap: false
+    train:
+      target: ldm.data.cifar.CIFARTrain
+      params:
+        data_root: /scratch/gabe/imagenet_ldm
+    validation:
+      target: ldm.data.cifar.CIFARValidation
+      params:
+        data_root: /scratch/gabe/imagenet_ldm
+
+
+lightning:
+  callbacks:
+    image_logger:
+      target: main.ImageLogger
+      params:
+        batch_frequency: 5000
+        max_images: 8
+        increase_log_steps: False
+
+  trainer:
+    benchmark: True
+    accumulate_grad_batches: 1
+    max_epochs: 500
